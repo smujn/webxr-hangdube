@@ -1,125 +1,71 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>Babylon WebXR Hand Playground</title>
+  <meta charset="UTF-8">
+  <title>WebXR AR for Google Cardboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
-    body { margin: 0; overflow: hidden; background: black; }
-    button, input[type="file"] {
+    body { margin: 0; overflow: hidden; }
+    canvas { display: block; }
+    #enter-ar {
       position: absolute;
       top: 20px;
-      z-index: 10;
+      left: 50%;
+      transform: translateX(-50%);
       padding: 10px 20px;
-      font-size: 16px;
-      background: pink;
-      color: black;
+      font-size: 18px;
+      background: #007aff;
+      color: white;
       border: none;
-      cursor: pointer;
+      border-radius: 8px;
+      z-index: 10;
     }
-    #enterVR { left: 20px; }
-    #uploadOBJ { left: 140px; }
-    canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
   </style>
 </head>
 <body>
-  <button id="enterVR">Enter VR</button>
-  <input type="file" id="uploadOBJ" accept=".obj" />
+  <button id="enter-ar">Enter AR</button>
+  <canvas id="xr-canvas"></canvas>
 
-  <canvas id="renderCanvas"></canvas>
-
-  <script src="https://cdn.babylonjs.com/babylon.js"></script>
-  <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.153.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.153.0/examples/jsm/webxr/ARButton.js"></script>
 
   <script>
-    const canvas = document.getElementById("renderCanvas");
-    const engine = new BABYLON.Engine(canvas, true);
-    const scene = new BABYLON.Scene(engine);
-    scene.clearColor = new BABYLON.Color4(0, 0, 0, 0);
+    let camera, scene, renderer, cube;
 
-    const camera = new BABYLON.UniversalCamera("camera", new BABYLON.Vector3(0, 1.6, -2), scene);
-    camera.attachControl(canvas, true);
+    init();
 
-    const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0, 1, 0), scene);
+    function init() {
+      scene = new THREE.Scene();
 
-    const cube = BABYLON.MeshBuilder.CreateBox("cube", { size: 0.2 }, scene);
-    cube.position.z = 1;
-    cube.material = new BABYLON.StandardMaterial("mat", scene);
-    cube.material.emissiveColor = BABYLON.Color3.FromHexString("#ff69b4");
+      camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
 
-    let isCubeGrabbed = false;
-    let grabOffset = new BABYLON.Vector3();
+      renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('xr-canvas'), antialias: true, alpha: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.xr.enabled = true;
 
-    scene.createDefaultXRExperienceAsync({}).then(xrHelper => {
-      const featureManager = xrHelper.baseExperience.featuresManager;
-      featureManager.enableFeature(BABYLON.WebXRFeatureName.HAND_TRACKING, "latest", {
-        xrInput: xrHelper.input,
-        jointMeshes: {
-          enablePhysics: false,
-          sourceMesh: BABYLON.MeshBuilder.CreateSphere("joint", { diameter: 0.01 }, scene),
-          keepOriginalVisible: true
-        }
-      });
-
-      const handTracking = featureManager.getEnabledFeature(BABYLON.WebXRFeatureName.HAND_TRACKING);
-
-      handTracking.onHandAddedObservable.add(hand => {
-        scene.onBeforeRenderObservable.add(() => {
-          const indexTip = hand.getJointMesh("index-finger-tip");
-          const thumbTip = hand.getJointMesh("thumb-tip");
-
-          if (indexTip && thumbTip) {
-            const distance = BABYLON.Vector3.Distance(indexTip.getAbsolutePosition(), thumbTip.getAbsolutePosition());
-            const isPinching = distance < 0.02;
-
-            if (isPinching && !isCubeGrabbed) {
-              const handPos = indexTip.getAbsolutePosition();
-              const cubeDistance = BABYLON.Vector3.Distance(cube.position, handPos);
-              if (cubeDistance < 0.3) {
-                isCubeGrabbed = true;
-                grabOffset.copyFrom(cube.position.subtract(handPos));
-              }
-            }
-
-            if (isCubeGrabbed) {
-              const handPos = indexTip.getAbsolutePosition();
-              cube.position.copyFrom(handPos.add(grabOffset));
-              cube.material.emissiveColor = BABYLON.Color3.Yellow();
-            }
-
-            if (!isPinching && isCubeGrabbed) {
-              isCubeGrabbed = false;
-              cube.material.emissiveColor = BABYLON.Color3.FromHexString("#ff69b4");
-            }
-          }
+      document.getElementById('enter-ar').addEventListener('click', () => {
+        navigator.xr.requestSession('immersive-ar', {
+          requiredFeatures: ['hit-test', 'dom-overlay'],
+          domOverlay: { root: document.body }
+        }).then(session => {
+          renderer.xr.setSession(session);
+          animate();
         });
       });
 
-      document.getElementById("enterVR").addEventListener("click", async () => {
-        await xrHelper.baseExperience.enterXRAsync("immersive-vr", "local-floor");
+      const geometry = new THREE.BoxGeometry(0.1, 0.1, 0.1);
+      const material = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+      cube = new THREE.Mesh(geometry, material);
+      cube.position.set(0, 0, -0.5);
+      scene.add(cube);
+    }
+
+    function animate() {
+      renderer.setAnimationLoop(() => {
+        cube.rotation.y += 0.01;
+        renderer.render(scene, camera);
       });
-    });
-
-    document.getElementById("uploadOBJ").addEventListener("change", event => {
-      const file = event.target.files[0];
-      if (!file) return;
-
-      const reader = new FileReader();
-      reader.onload = function(e) {
-        const objData = e.target.result;
-        BABYLON.SceneLoader.ImportMesh("", "", objData, scene, meshes => {
-          meshes.forEach(mesh => mesh.position.z = 1);
-        }, null, null, ".obj");
-      };
-      reader.readAsDataURL(file);
-    });
-
-    engine.runRenderLoop(() => {
-      scene.render();
-    });
-
-    window.addEventListener("resize", () => {
-      engine.resize();
-    });
+    }
   </script>
 </body>
 </html>

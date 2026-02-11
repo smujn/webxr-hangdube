@@ -2,70 +2,80 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>WebXR AR for Google Cardboard</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <style>
-    body { margin: 0; overflow: hidden; }
-    canvas { display: block; }
-    #enter-ar {
-      position: absolute;
-      top: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      padding: 10px 20px;
-      font-size: 18px;
-      background: #007aff;
-      color: white;
-      border: none;
-      border-radius: 8px;
-      z-index: 10;
-    }
-  </style>
+  <title>Hand Tracking WebXR Demo</title>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
 </head>
-<body>
-  <button id="enter-ar">Enter AR</button>
-  <canvas id="xr-canvas"></canvas>
-
-  <script src="https://cdn.jsdelivr.net/npm/three@0.153.0/build/three.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.153.0/examples/jsm/webxr/ARButton.js"></script>
-
+<body style="margin:0; overflow:hidden;">
+  <video id="input_video" style="display:none;"></video>
+  <canvas id="output_canvas" width="640" height="480"></canvas>
   <script>
-    let camera, scene, renderer, cube;
+    // --- MediaPipe Hands Setup ---
+    const videoElement = document.getElementById('input_video');
+    const canvasElement = document.getElementById('output_canvas');
+    const canvasCtx = canvasElement.getContext('2d');
 
-    init();
+    const hands = new Hands({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+    });
+    hands.setOptions({
+      maxNumHands: 1,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.7,
+      minTrackingConfidence: 0.7
+    });
 
-    function init() {
-      scene = new THREE.Scene();
+    hands.onResults(results => {
+      canvasCtx.save();
+      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+      canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
 
-      camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
+      if (results.multiHandLandmarks) {
+        for (const landmarks of results.multiHandLandmarks) {
+          // Draw a simple circle on the index fingertip
+          const indexTip = landmarks[8];
+          canvasCtx.beginPath();
+          canvasCtx.arc(indexTip.x * canvasElement.width,
+                        indexTip.y * canvasElement.height,
+                        10, 0, 2 * Math.PI);
+          canvasCtx.fillStyle = "red";
+          canvasCtx.fill();
+        }
+      }
+      canvasCtx.restore();
+    });
 
-      renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('xr-canvas'), antialias: true, alpha: true });
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      renderer.xr.enabled = true;
+    const camera = new Camera(videoElement, {
+      onFrame: async () => { await hands.send({image: videoElement}); },
+      width: 640,
+      height: 480
+    });
+    camera.start();
 
-      document.getElementById('enter-ar').addEventListener('click', () => {
-        navigator.xr.requestSession('immersive-ar', {
-          requiredFeatures: ['hit-test', 'dom-overlay'],
-          domOverlay: { root: document.body }
-        }).then(session => {
-          renderer.xr.setSession(session);
-          animate();
-        });
-      });
+    // --- Three.js WebXR Setup ---
+    const scene = new THREE.Scene();
+    const camera3D = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 100);
+    const renderer = new THREE.WebGLRenderer({antialias:true});
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.xr.enabled = true;
+    document.body.appendChild(renderer.domElement);
 
-      const geometry = new THREE.BoxGeometry(0.1, 0.1, 0.1);
-      const material = new THREE.MeshBasicMaterial({ color: 0xff0000 });
-      cube = new THREE.Mesh(geometry, material);
-      cube.position.set(0, 0, -0.5);
-      scene.add(cube);
-    }
+    const cube = new THREE.Mesh(
+      new THREE.BoxGeometry(0.2,0.2,0.2),
+      new THREE.MeshBasicMaterial({color:0x00ff00})
+    );
+    scene.add(cube);
+    camera3D.position.z = 1;
 
     function animate() {
-      renderer.setAnimationLoop(() => {
-        cube.rotation.y += 0.01;
-        renderer.render(scene, camera);
-      });
+      cube.rotation.x += 0.01;
+      cube.rotation.y += 0.01;
+      renderer.render(scene, camera3D);
     }
+    renderer.setAnimationLoop(animate);
+
+    document.body.appendChild(THREE.WebXR.createButton(renderer));
   </script>
 </body>
 </html>
